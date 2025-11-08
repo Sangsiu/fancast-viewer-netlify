@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KGMA 2025 - Trend of the Year Final Round Vote</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Tailwind fine-tune
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'] }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* tipis-in progress bar visual di sel persen */
+    .percent-bar {
+      position: absolute;
+      inset: 0;
+      opacity: .09;
+      border-radius: .5rem;
+      background: linear-gradient(to right, rgb(79 70 229), rgb(37 99 235));
+      transform-origin: left center;
+      pointer-events: none;
+    }
+    .tabular-nums { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body class="bg-white text-zinc-900 min-h-screen font-sans">
+  <div class="max-w-6xl mx-auto p-4 sm:p-6 space-y-8">
+    <!-- HEADER -->
+    <section class="rounded-3xl border border-zinc-200 bg-white shadow-sm p-5 sm:p-6">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div id="live-indicator"
+            class="inline-flex items-center gap-2 rounded-full border border-emerald-200 px-3 py-1 text-xs text-emerald-700 bg-emerald-50">
+            <span class="inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            Live
+            <span class="opacity-70">• refresh 10s</span>
+          </div>
+          <h1 class="mt-3 text-2xl sm:text-3xl font-semibold tracking-tight">
+            KGMA 2025 - Trend of the Year Final Round Vote
+          </h1>
+          <p class="mt-1 text-sm text-zinc-500">@2025 Copyright Sangsiu.</p>
+        </div>
+        <div class="flex flex-col sm:items-end gap-2">
+          <div class="flex gap-2">
+            <button id="refreshBtn"
+              class="px-3 py-2 rounded-xl bg-indigo-600 text-white text-sm hover:bg-indigo-700 shadow-sm">
+              Refresh
+            </button>
+          </div>
+          <div id="statusText" class="text-xs text-zinc-600">Loading...</div>
+        </div>
+      </div>
+
+      <!-- SEARCH -->
+      <div class="mt-4">
+        <div
+          class="flex items-center rounded-2xl border border-zinc-300 bg-white px-3 py-2 shadow-sm focus-within:ring-2 focus-within:ring-indigo-500">
+          <svg width="16" height="16" viewBox="0 0 24 24" class="opacity-60">
+            <path fill="currentColor"
+              d="m21.53 20.47l-4.8-4.8A7.92 7.92 0 0 0 18 10a8 8 0 1 0-8 8a7.92 7.92 0 0 0 5.67-1.27l4.8 4.8l1.06-1.06zM4 10a6 6 0 1 1 6 6a6 6 0 0 1-6-6" />
+          </svg>
+          <input id="searchInput" class="ml-2 w-full bg-transparent outline-none text-sm"
+            placeholder="Cari nama atau brand..." />
+        </div>
+      </div>
+    </section>
+
+    <!-- PODIUM -->
+    <section id="podium" class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4"></section>
+
+    <!-- TABLE -->
+    <section class="rounded-3xl border border-zinc-200 overflow-hidden bg-white shadow-sm">
+      <div class="max-h-[70vh] overflow-auto">
+        <table class="min-w-full text-sm">
+          <thead class="sticky top-0 bg-zinc-100/95 backdrop-blur z-10 border-b border-zinc-200">
+            <tr class="text-left text-xs uppercase tracking-wide text-zinc-600">
+              <th class="px-4 py-3">Rank</th>
+              <th class="px-4 py-3">Nama</th>
+              <th class="px-4 py-3">Brand</th>
+              <th class="px-4 py-3 text-right">Votes Before</th>
+              <th class="px-4 py-3 text-right">Votes Now</th>
+              <th class="px-4 py-3 text-right">Δ</th>
+              <th class="px-4 py-3 text-right">Persen</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody" class="divide-y divide-zinc-100"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="pb-4 text-center text-xs text-zinc-500">
+      Data auto-refresh setiap 10 detik. Tampilan ini hanya untuk monitoring (read-only).
+    </footer>
+  </div>
+
+  <script>
+    const REFRESH_MS = 10000;
+    let prevMap = new Map();
+    let bump = 0;
+
+    function fmtNum(n) {
+      return n.toLocaleString("en-US");
+    }
+
+    function trendArrow(delta) {
+      return delta > 0 ? "▲" : delta < 0 ? "▼" : "—";
+    }
+
+    async function fetchData() {
+      document.getElementById("statusText").textContent = "Memuat data...";
+      try {
+        const res = await fetch(`/api/nominee?b=${++bump}`, { cache: "no-store" });
+        if (!res.ok) throw new Error("API error: " + res.status);
+        const data = await res.json();
+        renderData(data.nominee || []);
+        document.getElementById("statusText").textContent = `Diperbarui: ${new Date().toLocaleTimeString()}`;
+      } catch (e) {
+        document.getElementById("statusText").textContent = "Gagal memuat data.";
+        console.error(e);
+      }
+    }
+
+    function renderData(rows) {
+      const tbody = document.getElementById("tableBody");
+      const podium = document.getElementById("podium");
+      tbody.innerHTML = "";
+      podium.innerHTML = "";
+
+      const sorted = [...rows].sort((a, b) => a.rank - b.rank);
+      const top3 = sorted.slice(0, 3);
+
+      // Render podium (tanpa ubah fungsi: hanya styling)
+      top3.forEach((it, idx) => {
+        const color =
+          idx === 0 ? "from-yellow-300 to-amber-400" :
+          idx === 1 ? "from-gray-300 to-gray-400" :
+          "from-orange-300 to-orange-400";
+        podium.insertAdjacentHTML("beforeend", `
+          <div class="rounded-3xl border border-zinc-200 p-5 bg-gradient-to-b ${color} text-zinc-900 shadow-sm">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <span class="inline-flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-white shadow bg-gradient-to-br ${color}">
+                  ${idx + 1}
+                </span>
+                <div>
+                  <div class="text-xs text-zinc-700/80">Posisi</div>
+                  <div class="text-lg font-semibold">${it.subject}</div>
+                </div>
+              </div>
+              <div class="text-right">
+                <div class="text-xs text-zinc-700/80">${it.etc || "—"}</div>
+                <div class="text-xl font-bold tabular-nums">${fmtNum(it.count)}</div>
+              </div>
+            </div>
+          </div>
+        `);
+      });
+
+      // Render table (fungsi tetap, hanya styling dan progress-bar visual)
+      rows.forEach((it, i) => {
+        const before = prevMap.has(it.keyNominee) ? prevMap.get(it.keyNominee) : it.count;
+        const delta = it.count - before;
+        const deltaClass = delta > 0
+          ? "text-emerald-600"
+          : delta < 0
+          ? "text-red-600"
+          : "text-zinc-500";
+
+        const zebra = i % 2 === 1 ? "bg-zinc-50/40" : "";
+
+        tbody.insertAdjacentHTML("beforeend", `
+          <tr class="relative hover:bg-zinc-50 transition ${zebra}">
+            <td class="px-4 py-3 font-semibold tabular-nums">#${it.rank}</td>
+            <td class="px-4 py-3">
+              <div class="font-medium">${it.subject}</div>
+            </td>
+            <td class="px-4 py-3 text-zinc-500">${it.etc || "-"}</td>
+            <td class="px-4 py-3 text-right tabular-nums">${fmtNum(before)}</td>
+            <td class="px-4 py-3 text-right font-medium tabular-nums">${fmtNum(it.count)}</td>
+            <td class="px-4 py-3 text-right ${deltaClass} tabular-nums">
+              ${trendArrow(delta)} ${delta === 0 ? "0" : fmtNum(delta)}
+            </td>
+            <td class="relative px-4 py-3 text-right tabular-nums">
+              <div class="percent-bar" style="transform: scaleX(${Math.max(0, Math.min(100, it.percent || 0)) / 100});"></div>
+              <span class="relative">${(it.percent ?? 0).toFixed(2)}%</span>
+            </td>
+          </tr>
+        `);
+      });
+
+      // update snapshot
+      const map = new Map();
+      rows.forEach(r => map.set(r.keyNominee, r.count));
+      prevMap = map;
+    }
+
+    // refresh loop
+    fetchData();
+    setInterval(fetchData, REFRESH_MS);
+
+    document.getElementById("refreshBtn").addEventListener("click", fetchData);
+    document.getElementById("searchInput").addEventListener("input", (e) => {
+      const q = e.target.value.toLowerCase();
+      const rows = [...document.querySelectorAll("#tableBody tr")];
+      rows.forEach(r => {
+        const txt = r.textContent.toLowerCase();
+        r.style.display = txt.includes(q) ? "" : "none";
+      });
+    });
+  </script>
+</body>
+</html>

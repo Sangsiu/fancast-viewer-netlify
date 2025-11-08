@@ -1,0 +1,7 @@
+[build]
+  publish = "public"
+
+[[redirects]]
+  from = "/api/nominee"
+  to = "/.netlify/functions/nominee"
+  status = 200
