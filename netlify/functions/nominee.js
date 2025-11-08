@@ -1,7 +1,7 @@
 // netlify/functions/nominee.js
 const FANCA = "https://api.fanca.io/event/nominee";
 
-// normalisasi ke shape index.html: keyNominee, rank, subject, etc, count, percent
+// normalisasi ke shape index.html
 function normalize(input) {
   if (!input) return [];
   if (Array.isArray(input)) return input;
@@ -25,7 +25,6 @@ const demo = [
 
 exports.handler = async (event) => {
   try {
-    // aktifkan demo via env jika perlu
     if (process.env.USE_DEMO === "1") {
       return {
         statusCode: 200,
@@ -43,12 +42,16 @@ exports.handler = async (event) => {
     url.searchParams.set("typeSort", typeSort);
     url.searchParams.set("typePeriod", typePeriod);
 
+    // Izinkan override via env supaya mudah eksperimen
+    const ORIGIN = process.env.ORIGIN || "https://api.fanca.io";
+    const REFERER = process.env.REFERER || "https://api.fanca.io/";
+
     const headers = {
       "user-agent": "Dart/3.7 (dart:io)",
       "x-api-token": process.env.X_API_TOKEN || "",
       connection: "Keep-Alive",
       "community-tab-index": "0",
-      "accept-encoding": "gzip",
+      "accept-encoding": "gzip, deflate, br",
       "system-language": "en-US",
       "content-type": "application/json",
       "community-translate-type": "true",
@@ -68,16 +71,34 @@ exports.handler = async (event) => {
       "cache-control": "no-cache",
       pragma: "no-cache",
       "x-requested-with": "XMLHttpRequest",
+
+      // Tambahan yang sering dicek WAF
+      origin: ORIGIN,
+      referer: REFERER,
+      "sec-fetch-site": "same-site",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-dest": "empty",
+      "sec-ch-ua": '"Chromium";v="129", "Not?A_Brand";v="99"',
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": '"Windows"',
     };
+
     if (process.env.X_FINGERPRINT) headers["fingerprint"] = process.env.X_FINGERPRINT;
 
     const r = await fetch(url.toString(), { headers, method: "GET", redirect: "follow" });
+
+    // kumpulkan header upstream untuk debug
+    const uh = {};
+    ["content-type", "server", "cf-ray", "cf-cache-status", "vary"].forEach((k) => {
+      const v = r.headers.get(k);
+      if (v) uh[k] = v;
+    });
+
     const text = await r.text();
     let parsed; try { parsed = JSON.parse(text); } catch { parsed = { raw: text }; }
 
     let nominee = normalize(parsed?.data ?? parsed);
 
-    // hitung persen jika belum ada
     if (nominee.length && !nominee.some(n => typeof n.percent === "number" && n.percent > 0)) {
       const total = nominee.reduce((s, n) => s + (Number(n.count) || 0), 0);
       nominee = nominee.map(n => ({
@@ -86,6 +107,7 @@ exports.handler = async (event) => {
       }));
     }
 
+    // Balikkan 200 supaya UI tetap jalan, tapi sertakan meta untuk diagnosis
     return {
       statusCode: 200,
       headers: { "content-type": "application/json" },
@@ -95,8 +117,12 @@ exports.handler = async (event) => {
           meta: {
             upstreamStatus: r.status,
             upstreamReason: r.statusText,
+            upstreamHeaders: uh,
             params: { keyCategory, typeSort, typePeriod },
             upstreamSample: nominee.length ? undefined : (parsed?.message || parsed?.raw || parsed),
+            usedOrigin: ORIGIN,
+            usedReferer: REFERER,
+            usedFingerprint: !!process.env.X_FINGERPRINT,
           },
         },
         null,
